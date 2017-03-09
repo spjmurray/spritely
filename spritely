@@ -1,0 +1,96 @@
+#!/usr/bin/ruby
+
+# Copyright (C) Simon Murray 2017 All Rights Reserved
+
+require 'chunky_png'
+require 'optparse'
+
+# Module to handle generation of ANSI escape sequences
+module ANSI
+
+  # Generate an RGB colour ANSI escape seqence
+  def self.colour(r, g, b, background)
+    "\033[#{background && 48 || 38};2;#{r};#{g};#{b}m"
+  end
+
+  # Wrapper to generate a ANSI foreground colour from an RGBA Fixnum
+  def self.foreground(c)
+    colour(*ChunkyPNG::Color.to_truecolor_bytes(c), false)
+  end
+
+  # Wrapper to generate an ANSI background colour from an RGBA Fixnum
+  def self.background(c)
+    colour(*ChunkyPNG::Color.to_truecolor_bytes(c), true)
+  end
+
+  # Generate an reset ANSI escape sequence
+  def self.reset
+    "\033[0m"
+  end
+
+end
+
+# Module to load a PNG sprite and print out a full colour Unicode
+# bitmap on the terminal
+module Spritely
+
+  # Main entry point
+  def self.run!
+    # Create our options parser
+    options = {}
+    opts = OptionParser.new
+    opts.banner = 'Usage: spritely [options] filename.png'
+    opts.on('-p', '--padding [PADDING]', Integer, 'Left padding') do |v|
+      options[:padding] = v
+    end
+
+    # Parse optional arguments, removing from ARGV
+    begin
+      opts.parse!
+    rescue OptionParser::InvalidOption
+      puts opts
+      exit 1
+    end
+
+    # Collect positional arguments
+    filename = ARGV.pop
+    unless filename
+      puts opts
+      exit 1
+    end
+
+    # Load in our sprite
+    png = ChunkyPNG::Image.from_file(filename)
+
+    # If it has an odd height add in a blank row, we process on groups of 2 rows
+    if png.height.odd?
+      png = ChunkyPNG::Image.new(png.width, png.height.next, png.pixels + Array.new(png.width, ChunkyPNG::Color::TRANSPARENT))
+    end
+
+    # For each pair of rows iterate over their indices
+    png.height.times.each_slice(2) do |top, bottom|
+
+      # Initialize the output string
+      output = options[:padding] && (' ' * options[:padding]) || ''
+
+      # Zip the rows together into an array of columns and iterate over it.
+      # Colours are in full 24 bit RGB, opacity controls the output character
+      png.row(top).zip(png.row(bottom)).each do |color1, color2|
+        if ChunkyPNG::Color.opaque?(color1) && ChunkyPNG::Color.opaque?(color2)
+          output += ANSI::foreground(color1) + ANSI::background(color2) + "\u2580".encode('utf-8') + ANSI::reset
+        elsif ChunkyPNG::Color.opaque?(color1)
+          output += ANSI::foreground(color1) + "\u2580".encode('utf-8') + ANSI::reset
+        elsif ChunkyPNG::Color.opaque?(color2)
+          output += ANSI::foreground(color2) + "\u2584".encode('utf-8') + ANSI::reset
+        else
+          output += ' '
+        end
+      end
+
+      puts output
+    end
+  end
+
+end
+
+Spritely.run!
